@@ -33,7 +33,11 @@ class source_impl : public source {
     private:
     lms_stream_t streamId[2];
 
-    bool stream_analyzer = false;
+    bool stream_analyzer = true;
+    bool PPS_mode;
+    int fpga_delay_samples;
+    uint64_t last_pps_sample_counter_ch0;
+    uint64_t last_pps_sample_counter_ch1;
 
     int source_block = 1;
 
@@ -54,8 +58,13 @@ class source_impl : public source {
 
     void add_time_tag(int channel, lms_stream_meta_t meta);
 
+    void add_PPS_time_tag(int channel, uint64_t PPS_samplestamp);
+
     public:
-    source_impl(std::string serial, int channel_mode, const std::string& filename);
+    source_impl(std::string serial,
+                int channel_mode,
+                const std::string& filename,
+                bool enable_PPS_mode);
     ~source_impl();
 
     int general_work(int noutput_items,
@@ -70,7 +79,7 @@ class source_impl : public source {
     inline gr::io_signature::sptr args_to_io_signature(int channel_mode);
 
     void init_stream(int device_number, int channel);
-    void release_stream(int device_number, lms_stream_t *stream);
+    void release_stream(int device_number, lms_stream_t* stream);
 
     double set_center_freq(double freq, size_t chan = 0);
 
@@ -91,8 +100,13 @@ class source_impl : public source {
     void set_buffer_size(uint32_t size);
 
     void calibrate(double bandw, int channel = 0);
-    
+
     void set_tcxo_dac(uint16_t dacVal = 125);
+
+    void setFpgaDelaySamples(int fpgaDelaySamples) { fpga_delay_samples = fpgaDelaySamples; }
+
+    bool set_ext_clk(double fref_Mhz);
+    bool disable_ext_clk();
 };
 } // namespace limesdr
 } // namespace gr

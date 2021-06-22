@@ -27,11 +27,18 @@
 
 namespace gr {
 namespace limesdr {
-source::sptr source::make(std::string serial, int channel_mode, const std::string& filename) {
-    return gnuradio::get_initial_sptr(new source_impl(serial, channel_mode, filename));
+source::sptr source::make(std::string serial,
+                          int channel_mode,
+                          const std::string& filename,
+                          bool enable_PPS_mode) {
+    return gnuradio::get_initial_sptr(
+        new source_impl(serial, channel_mode, filename, enable_PPS_mode));
 }
 
-source_impl::source_impl(std::string serial, int channel_mode, const std::string& filename)
+source_impl::source_impl(std::string serial,
+                         int channel_mode,
+                         const std::string& filename,
+                         bool enable_PPS_mode)
     : gr::block("source",
                 gr::io_signature::make(
                     0, 0, 0), // Based on channel_mode SISO/MIMO use appropriate output signature
@@ -67,6 +74,12 @@ source_impl::source_impl(std::string serial, int channel_mode, const std::string
         device_handler::getInstance().enable_channels(
             stored.device_number, stored.channel_mode, LMS_CH_RX);
     }
+
+    // ESA PPS counter mod.
+    device_handler::getInstance().set_PPS_mode(stored.device_number, enable_PPS_mode);
+    PPS_mode = enable_PPS_mode;
+    last_pps_sample_counter_ch0 = 0;
+    last_pps_sample_counter_ch1 = 0;
 }
 
 source_impl::~source_impl() {
@@ -147,10 +160,21 @@ int source_impl::general_work(int noutput_items,
 
         LMS_GetStreamStatus(&streamId[stored.channel_mode], &status);
 
-        if (add_tag || status.droppedPackets > 0) {
-            pktLoss += status.droppedPackets;
-            add_tag = false;
-            this->add_time_tag(0, rx_metadata);
+        if (PPS_mode == false) // default LimeSDR sample counter
+        {
+            if (add_tag || status.droppedPackets > 0) {
+                pktLoss += status.droppedPackets;
+                add_tag = false;
+                this->add_time_tag(LMS_CH_0, rx_metadata);
+            }
+        } else {
+            // ESA PPS mode is active: Report sample counter only in PPS transitions (sample counter
+            // reset)
+            if (rx_metadata.timestamp < last_pps_sample_counter_ch0) // PPS transition detected
+            {
+                add_PPS_time_tag(LMS_CH_0, rx_metadata.timestamp);
+            }
+            last_pps_sample_counter_ch0 = rx_metadata.timestamp;
         }
         // Print stream stats to debug
         if (stream_analyzer == true) {
@@ -175,13 +199,31 @@ int source_impl::general_work(int noutput_items,
 
         LMS_GetStreamStatus(&streamId[LMS_CH_0], &status[0]);
         LMS_GetStreamStatus(&streamId[LMS_CH_1], &status[1]);
+        if (PPS_mode == false) // default LimeSDR sample counter
+        {
+            if (add_tag || status[0].droppedPackets > 0 || status[1].droppedPackets > 0) {
+                pktLoss += status[0].droppedPackets; // because every time GetStreamStatus is
+                                                     // called, packet loss is reset
+                add_tag = false;
+                this->add_time_tag(LMS_CH_0, rx_metadata[0]);
+                this->add_time_tag(LMS_CH_1, rx_metadata[1]);
+            }
+        } else {
+            // ESA PPS mode is active: Report sample counter only in PPS transitions (sample counter
+            // reset)
+            if (rx_metadata[0].timestamp < last_pps_sample_counter_ch0) // PPS transition detected
+            {
+                add_PPS_time_tag(LMS_CH_0, rx_metadata[0].timestamp);
+            }
+            last_pps_sample_counter_ch0 = rx_metadata[0].timestamp;
 
-        if (add_tag || status[0].droppedPackets > 0 || status[1].droppedPackets > 0) {
-            pktLoss += status[0].droppedPackets; // because every time GetStreamStatus is called,
-                                                 // packet loss is reset
-            add_tag = false;
-            this->add_time_tag(LMS_CH_0, rx_metadata[0]);
-            this->add_time_tag(LMS_CH_1, rx_metadata[1]);
+            // ESA PPS mode is active: Report sample counter only in PPS transitions (sample counter
+            // reset)
+            if (rx_metadata[1].timestamp < last_pps_sample_counter_ch1) // PPS transition detected
+            {
+                add_PPS_time_tag(LMS_CH_1, rx_metadata[1].timestamp);
+            }
+            last_pps_sample_counter_ch1 = rx_metadata[1].timestamp;
         }
 
         // Print stream stats to debug
@@ -261,6 +303,23 @@ inline gr::io_signature::sptr source_impl::args_to_io_signature(int channel_numb
         exit(0);
     }
 }
+
+// Add RAW PPS sample counter tag to stream
+void source_impl::add_PPS_time_tag(int channel, uint64_t PPS_samplestamp) {
+    const pmt::pmt_t ID = pmt::string_to_symbol(stored.serial);
+    const pmt::pmt_t t_val =
+        pmt::make_tuple(pmt::from_uint64(PPS_samplestamp), pmt::from_double(0.0));
+    this->add_item_tag(channel, nitems_written(channel), TIME_TAG, t_val, ID);
+}
+
+bool source_impl::set_ext_clk(double fref_Mhz) {
+    return device_handler::getInstance().set_ext_clk(stored.device_number, fref_Mhz);
+}
+
+bool source_impl::disable_ext_clk() {
+    return device_handler::getInstance().disable_ext_clk(stored.device_number);
+}
+
 double source_impl::set_center_freq(double freq, size_t chan) {
     add_tag = true;
     return device_handler::getInstance().set_rf_freq(

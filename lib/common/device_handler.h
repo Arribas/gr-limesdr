@@ -22,9 +22,9 @@
 #define DEVICE_HANDLER_H
 
 #include <LimeSuite.h>
-#include <limeRFE.h>
 #include <cmath>
 #include <iostream>
+#include <limeRFE.h>
 #include <list>
 #include <math.h>
 #include <mutex>
@@ -62,12 +62,11 @@ class device_handler {
         std::string sink_filename;
     };
 
-    struct rfe_device
-    {
+    struct rfe_device {
         int rx_channel = 0;
         int tx_channel = 0;
         rfe_dev_t* rfe_dev = nullptr;
-    }rfe_device;
+    } rfe_device;
     // Device list
     lms_info_str_t* list = new lms_info_str_t[20];
     // Device vector. Adds devices from the list
@@ -145,7 +144,7 @@ class device_handler {
      * @param   device_number Device number from the list of LMS_GetDeviceList.
      *
      * @param   filename Path to file if file switch is turned on.
-     * 
+     *
      * @param   antenna_tx Pointer to TX antenna, so PA path would be updated in sink block
      */
     void settings_from_file(int device_number, const std::string& filename, int* antenna_tx);
@@ -160,6 +159,38 @@ class device_handler {
      * @param   direction  Direction of samples RX(LMS_CH_RX), TX(LMS_CH_RX).
      */
     void enable_channels(int device_number, int channel_mode, bool direction);
+
+    /**
+     * Enable or disable ESA PPS mode
+     *
+     * @param   device_number Device number from the list of LMS_GetDeviceList.
+     *
+     * @param   True: enable and report PPS sample counter. False: Default LimeSDR sample counter
+     * mode
+     */
+
+    void set_PPS_mode(int device_number, bool PPS_mode);
+
+    /**
+     * Enable External clock input with the desired frequency
+     *
+     * @param   device_number Device number from the list of LMS_GetDeviceList.
+     *
+     * @param   fref_Mhz is the expected external clock frequency
+     *
+     * @return  true if success
+     */
+
+    bool set_ext_clk(int device_number, double fref_Mhz);
+
+    /**
+     * Disable External clock input
+     *
+     * @param   device_number Device number from the list of LMS_GetDeviceList.
+     *
+     * @return  true if success
+     */
+    bool disable_ext_clk(int device_number);
 
     /**
      * Set the same sample rate for both channels.
@@ -291,13 +322,13 @@ class device_handler {
      * LimeSDR-USB default value is 125 range is [0,255]
      * LimeSDR-PCIe default value is 134 range is [0,255]
      * LimeNET-Micro default value is 30714 range is [0,65535]
-     * 
+     *
      * @param   device_number  Device number from the list of LMS_GetDeviceList.
      *
      * @param   dacVal		   DAC value (0-65535)
      */
     void set_tcxo_dac(int device_number, uint16_t dacVal);
-        /**
+    /**
      * Sets up LimeRFE device pointer so that automatic channel configuration could be made
      * @param   rfe_dev  Pointer to LimeRFE device descriptor
      */
@@ -306,7 +337,6 @@ class device_handler {
      * Assigns configured LimeSDR channels to LimeRFE for automatic channel switching
      */
     void update_rfe_channels();
-
 };
 
 

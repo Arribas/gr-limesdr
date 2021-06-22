@@ -20,6 +20,8 @@
 
 #include "device_handler.h"
 #include <LMS7002M_parameters.h>
+#include <lime/ADF4002.h> //external clock input configuration
+#include <lime/lms7_device.h>
 
 device_handler::~device_handler() { delete list; }
 
@@ -271,8 +273,8 @@ void device_handler::enable_channels(int device_number, int channel_mode, bool d
             device_handler::getInstance().error(device_number);
         std::cout << "SISO CH" << channel_mode << " set for device number " << device_number << "."
                   << std::endl;
-                          std::cout << "SISO CH" << channel_mode << " set for device number "
-                  << device_number << "." << std::endl;
+        std::cout << "SISO CH" << channel_mode << " set for device number " << device_number << "."
+                  << std::endl;
 
         if (direction)
             rfe_device.tx_channel = channel_mode;
@@ -297,6 +299,97 @@ void device_handler::enable_channels(int device_number, int channel_mode, bool d
     }
 }
 
+
+void device_handler::set_PPS_mode(int device_number, bool PPS_mode) {
+    // ESA mod.
+    // Enable PPS in (1) disable (0)
+    if (PPS_mode == true) {
+        if (LMS_WriteFPGAReg(device_handler::getInstance().get_device(device_number), 11, 1) != 0) {
+            std::cout << "Error writting FPGA register!\n";
+        }
+    } else {
+        if (LMS_WriteFPGAReg(device_handler::getInstance().get_device(device_number), 11, 0) != 0) {
+            std::cout << "Error writting FPGA register!\n";
+        }
+    }
+}
+
+bool device_handler::disable_ext_clk(int device_number) {
+
+    std::cout << "Disabling external reference clock\n";
+    double val;
+    uint8_t id = 0;
+    auto port =
+        static_cast<lime::LMS7_Device*>(device_handler::getInstance().get_device(device_number))
+            ->GetConnection();
+    port->CustomParameterRead(&id, &val, 1, nullptr);
+    port->CustomParameterWrite(&id, &val, 1, "");
+    return true;
+}
+
+bool device_handler::set_ext_clk(int device_number, double fref_Mhz) {
+    lime::ADF4002* m_pModule;
+    m_pModule = new lime::ADF4002();
+
+    double refclk;
+    LMS_GetClockFreq(
+        device_handler::getInstance().get_device(device_number), LMS_CLOCK_REF, &refclk);
+    std::cout << "LMS_CLOCK_REF: " << refclk / 1e6 << " MHz\n";
+    std::cout << "Set ext clock freq " << fref_Mhz << std::endl;
+    // defaults from LimeSuiteGUI
+    int ldp = 0;
+    int abw = 0;
+    int rCount = 125;
+    int cpGain = 0;
+    int nCounter = 384;
+    int currSetting1 = 7;
+    int currSetting2 = 7;
+    int tCounter = 0;
+    int fastLock = 0;
+    int muxControl = 1;
+    int pdPol = 1;
+    int pd1 = 0;
+    int pd2 = 0;
+    int counterReset = 0;
+    int cpState = 0;
+    double fvco = 30.720000;
+
+    // reference counter latch
+    m_pModule->SetReferenceCounterLatch(ldp, abw, rCount);
+
+    // n counter latch
+    m_pModule->SetNCounterLatch(cpGain, nCounter);
+
+    // function latch
+    m_pModule->SetFunctionLatch(currSetting1, currSetting2, tCounter, fastLock, muxControl);
+    m_pModule->SetFunctionLatchRgr(pdPol, pd1, pd2, counterReset, cpState);
+
+    // Initialization latch
+    m_pModule->SetInitializationLatch(currSetting1, currSetting2, tCounter, fastLock, muxControl);
+    m_pModule->SetInitializationLatchRgr(pdPol, pd1, pd2, counterReset, cpState);
+
+    m_pModule->SetFrefFvco(fref_Mhz, fvco, rCount, nCounter);
+
+    unsigned char data[12];
+    m_pModule->GetConfig(data);
+
+    std::vector<uint32_t> dataWr;
+    for (int i = 0; i < 12; i += 3)
+        dataWr.push_back((uint32_t)data[i] << 16 | (uint32_t)data[i + 1] << 8 | data[i + 2]);
+
+    int status;
+    // ADF4002 needs to be writen 4 values of 24 bits
+    auto port =
+        static_cast<lime::LMS7_Device*>(device_handler::getInstance().get_device(device_number))
+            ->GetConnection();
+    status = port->TransactSPI(0x30, dataWr.data(), nullptr, 4);
+    if (status != 0) {
+        std::cout << "ADF configuration failed\n";
+        return false;
+    } else {
+        return true;
+    }
+}
 void device_handler::set_samp_rate(int device_number, double& rate) {
     std::cout << "INFO: device_handler::set_samp_rate(): ";
     if (LMS_SetSampleRate(device_handler::getInstance().get_device(device_number), rate, 0) !=
@@ -486,8 +579,7 @@ device_handler::set_gain(int device_number, bool direction, int channel, unsigne
                   << " dB." << std::endl;
         return gain_value;
     } else {
-        std::cout << "ERROR: device_handler::set_gain(): valid gain range [0, 73] "
-                  << std::endl;
+        std::cout << "ERROR: device_handler::set_gain(): valid gain range [0, 73] " << std::endl;
         close_all_devices();
     }
 }
@@ -561,8 +653,7 @@ void device_handler::set_tcxo_dac(int device_number, uint16_t dacVal) {
 
 void device_handler::set_rfe_device(rfe_dev_t* rfe_dev) { rfe_device.rfe_dev = rfe_dev; }
 
-void device_handler::update_rfe_channels()
-{
+void device_handler::update_rfe_channels() {
     if (rfe_device.rfe_dev) {
         std::cout << "INFO: device_handler::update_rfe_channels(): ";
         if (RFE_AssignSDRChannels(
@@ -573,8 +664,7 @@ void device_handler::update_rfe_channels()
         std::cout << "RFE RX channel: " << rfe_device.rx_channel
                   << " TX channel: " << rfe_device.tx_channel << std::endl;
     } else {
-        std::cout
-            << "ERROR: device_handler::update_rfe_channels(): no assigned RFE device"
-            << std::endl;
+        std::cout << "ERROR: device_handler::update_rfe_channels(): no assigned RFE device"
+                  << std::endl;
     }
 }
