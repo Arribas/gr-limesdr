@@ -33,7 +33,7 @@ class source_impl : public source {
     private:
     lms_stream_t streamId[2];
 
-    bool stream_analyzer = true;
+    bool stream_analyzer = false;
     bool PPS_mode;
     int fpga_delay_samples;
     uint64_t last_pps_sample_counter_ch0;
